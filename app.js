@@ -480,7 +480,8 @@ function renderHeader() {
   if (!meta) return;
   const av = $('#chat-avatar');
   const sub = $('#chat-sub');
-  $('#chat-actions').hidden = !active.startsWith('dm:');
+  const actions = $('#chat-actions');
+  if (actions) actions.hidden = !active.startsWith('dm:');
 
   if (active.startsWith('dm:')) {
     paintAvatar(av, meta.name, meta.color);
