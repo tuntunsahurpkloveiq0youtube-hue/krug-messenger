@@ -1,0 +1,25 @@
+# Blueprint для Render: https://render.com/docs/blueprint-spec
+# В репозитории: New → Blueprint → выберите репозиторий → Apply.
+services:
+  - type: web
+    name: krug
+    runtime: node
+    plan: free
+    buildCommand: "echo no build step"
+    startCommand: node server.mjs
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 22.11.0
+      # код доступа для друзей: задайте в дашборде (sync: false — значение не в репозитории)
+      - key: FRIENDS_CODE
+        sync: false
+      # настоящие письма: ключ Resend и адрес отправителя
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      # демо-режим почты (код на экране) — включите, если ключа Resend нет
+      - key: KRUG_DEV_MAIL
+        sync: false

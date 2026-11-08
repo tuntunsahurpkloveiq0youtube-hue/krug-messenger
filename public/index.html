@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0f1a">
+  <title>Круг</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+  <!-- ───────────── Вход ───────────── -->
+  <div id="join" class="join">
+    <div class="join-glow" aria-hidden="true"></div>
+    <div class="join-card">
+      <div class="logo">💬</div>
+      <h1>Круг</h1>
+      <p class="tagline">Мессенджер для своих</p>
+
+      <div class="tabs" id="join-tabs" role="tablist" aria-label="Способ входа" hidden>
+        <button type="button" class="tab active" data-tab="name" role="tab" aria-selected="true">По имени</button>
+        <button type="button" class="tab" data-tab="email" role="tab" aria-selected="false">По почте</button>
+      </div>
+
+      <label class="field" id="code-wrap" hidden>
+        <span>Код доступа</span>
+        <input id="join-code" autocomplete="off" spellcheck="false" placeholder="Спросите у друзей">
+      </label>
+
+      <form id="join-form" autocomplete="on" data-pane="name">
+        <label class="field">
+          <span>Ваше имя</span>
+          <input id="join-name" name="nickname" maxlength="20" required
+                 placeholder="Например, Аня" autocomplete="nickname" spellcheck="false">
+        </label>
+        <button class="primary" id="join-btn" type="submit">Войти</button>
+        <p class="form-error" id="join-error" role="alert"></p>
+      </form>
+
+      <form id="email-form" autocomplete="on" data-pane="email" hidden>
+        <label class="field">
+          <span>Почта</span>
+          <input id="email-input" name="email" type="email" required inputmode="email"
+                 placeholder="you@example.com" autocomplete="email" spellcheck="false">
+        </label>
+
+        <div id="email-step1">
+          <button class="primary" id="email-send" type="submit">Получить код</button>
+        </div>
+
+        <div id="email-step2" hidden>
+          <label class="field">
+            <span>Код из письма</span>
+            <input id="email-code" inputmode="numeric" autocomplete="one-time-code"
+                   maxlength="6" placeholder="6 цифр">
+          </label>
+          <button class="primary" id="email-verify" type="submit">Войти</button>
+          <div class="resend-row">
+            <button type="button" class="link" id="email-resend" disabled>Отправить код ещё раз</button>
+            <button type="button" class="link" id="email-other">Другая почта</button>
+          </div>
+        </div>
+
+        <p class="form-error" id="email-error" role="alert"></p>
+      </form>
+
+      <p class="hint" id="join-hint">Вход по имени или по почте.<br>История хранится на этом сервере.</p>
+    </div>
+  </div>
+
+  <!-- ───────────── Приложение ───────────── -->
+  <div id="app" class="app" hidden>
+    <aside id="sidebar" class="sidebar">
+      <header class="me">
+        <div class="avatar" id="me-avatar"></div>
+        <div class="me-info">
+          <div class="me-name" id="me-name"></div>
+          <div class="me-status" id="me-status">в сети</div>
+        </div>
+        <button class="icon-btn" id="sound-toggle" type="button" title="Звук уведомлений">🔔</button>
+      </header>
+
+      <div class="sidebar-scroll">
+        <section class="section">
+          <div class="section-head">
+            <span>Каналы</span>
+            <button class="icon-btn" id="add-room" type="button" title="Создать канал">＋</button>
+          </div>
+          <ul id="room-list" class="conv-list"></ul>
+        </section>
+
+        <section class="section">
+          <div class="section-head">
+            <span>Личные сообщения</span>
+            <button class="icon-btn" id="new-dm" type="button" title="Написать другу">✎</button>
+          </div>
+          <ul id="dm-list" class="conv-list"></ul>
+          <p class="empty-note" id="dm-empty">Пока пусто — напишите кому-нибудь.</p>
+        </section>
+
+        <section class="section">
+          <div class="section-head">
+            <span>В сети <span class="pill" id="online-count">0</span></span>
+          </div>
+          <ul id="online-list" class="conv-list"></ul>
+        </section>
+      </div>
+
+      <footer class="sidebar-foot">
+        <button class="link-btn" id="logout" type="button">Выйти</button>
+      </footer>
+    </aside>
+
+    <main class="chat" id="chat">
+      <div class="empty" id="empty">
+        <div class="empty-logo">💬</div>
+        <h2>Выберите чат</h2>
+        <p>Канал или личная переписка — слева.</p>
+      </div>
+
+      <div class="chat-box" id="chat-box" hidden>
+        <header class="chat-head">
+          <button class="icon-btn back" id="back" type="button" title="Назад">←</button>
+          <div class="chat-avatar" id="chat-avatar"></div>
+          <div class="chat-title">
+            <div class="chat-name" id="chat-name"></div>
+            <div class="chat-sub" id="chat-sub"></div>
+          </div>
+          <div class="typing" id="typing" hidden></div>
+        </header>
+
+        <div class="messages" id="messages" aria-live="polite"></div>
+
+        <button class="scroll-down" id="scroll-down" type="button" title="Вниз" hidden>↓</button>
+
+        <div class="composer-wrap">
+          <div class="emoji-pop" id="emoji-pop" hidden></div>
+          <form class="composer" id="composer">
+            <button class="icon-btn" id="emoji-btn" type="button" title="Эмодзи">😊</button>
+            <button class="icon-btn" id="attach-btn" type="button" title="Прикрепить картинку">📎</button>
+            <input type="file" id="file-input" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
+            <textarea id="input" rows="1" maxlength="4000" placeholder="Написать сообщение…"
+                      spellcheck="true"></textarea>
+            <button class="send" id="send-btn" type="submit" title="Отправить">➤</button>
+          </form>
+          <div class="composer-hint">Enter — отправить · Shift+Enter — новая строка</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ───────────── Вспомогательные слои ───────────── -->
+  <div class="modal" id="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true">
+      <h3 id="modal-title"></h3>
+      <div id="modal-body"></div>
+      <div class="modal-actions" id="modal-actions"></div>
+    </div>
+  </div>
+
+  <div class="lightbox" id="lightbox" hidden><img id="lightbox-img" alt="Картинка"></div>
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
