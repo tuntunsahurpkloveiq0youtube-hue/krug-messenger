@@ -242,6 +242,40 @@ function lastTs(convId) {
 const sessions = new Map(); // token -> { key, token, conns:Set<res> }
 const rate = new Map();     // token -> [ts]
 const loginCodes = new Map(); // email -> { code, exp, attempts, sent: [ts] }
+const calls = new Map(); // callId -> { id, caller, callee, kind, state, createdAt, timer }
+
+const CALL_RING_TIMEOUT = 45_000;
+
+/* ────────────────────────────  ЗВОНКИ (сигналинг)  ──────────────────────────── */
+
+function callOf(key) {
+  for (const c of calls.values()) if (c.caller === key || c.callee === key) return c;
+  return null;
+}
+
+function endCall(c) {
+  if (c.timer) clearTimeout(c.timer);
+  c.timer = null;
+  calls.delete(c.id);
+}
+
+function callEvent(c, actor, extra) {
+  const u = db.users[actor];
+  broadcast(
+    {
+      type: 'call',
+      callId: c.id,
+      kind: c.kind,
+      state: c.state,
+      caller: c.caller,
+      callee: c.callee,
+      from: actor,
+      fromName: u ? u.name : '',
+      ...extra,
+    },
+    (s) => s.key === c.caller || s.key === c.callee,
+  );
+}
 
 let presenceTimer = null;
 function schedulePresence() {
@@ -707,6 +741,73 @@ async function handleApi(req, res, url, pathname) {
         lastTs: lastTs(id),
       },
     });
+  }
+
+  /* ── звонки: сигналинг WebRTC ── */
+  if (pathname === '/api/call' && method === 'POST') {
+    const body = await readBody(req, 256 * 1024);
+    const action = String(body.action || '');
+
+    if (action === 'invite') {
+      const to = String(body.to || '').toLowerCase();
+      const other = db.users[to];
+      if (!other || to === s.key) throw httpError(404, 'Пользователь не найден');
+      if (callOf(s.key)) throw httpError(409, 'Вы уже разговариваете');
+      if (callOf(to)) throw httpError(409, `${other.name} сейчас занят(а)`);
+      if (!isOnline(to)) throw httpError(409, `${other.name} не в сети`);
+      const kind = body.kind === 'video' ? 'video' : 'audio';
+      const c = {
+        id: crypto.randomBytes(8).toString('hex'),
+        caller: s.key,
+        callee: to,
+        kind,
+        state: 'ringing',
+        createdAt: Date.now(),
+        timer: null,
+      };
+      c.timer = setTimeout(() => {
+        endCall(c);
+        callEvent(c, c.caller, { action: 'timeout' });
+      }, CALL_RING_TIMEOUT);
+      if (c.timer.unref) c.timer.unref();
+      calls.set(c.id, c);
+      callEvent(c, s.key, { action: 'invite' });
+      return sendJson(res, 200, { callId: c.id, state: c.state });
+    }
+
+    const c = calls.get(String(body.callId || ''));
+    if (!c) throw httpError(409, 'Звонок уже завершён');
+    if (c.caller !== s.key && c.callee !== s.key) throw httpError(403, 'Это не ваш звонок');
+
+    if (action === 'accept') {
+      if (s.key !== c.callee) throw httpError(403, 'Принять звонок может только собеседник');
+      if (c.state !== 'ringing') throw httpError(409, 'Звонок уже принят');
+      c.state = 'active';
+      if (c.timer) clearTimeout(c.timer);
+      c.timer = null;
+      callEvent(c, s.key, { action: 'accept' });
+      return sendJson(res, 200, { ok: true, state: c.state });
+    }
+
+    if (action === 'decline' || action === 'hangup') {
+      endCall(c);
+      callEvent(c, s.key, { action });
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (action === 'offer' || action === 'answer') {
+      const sdp = body.sdp;
+      if (!sdp || typeof sdp !== 'object') throw httpError(400, 'Нет описания соединения');
+      callEvent(c, s.key, { action, sdp });
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (action === 'ice') {
+      if (body.candidate) callEvent(c, s.key, { action: 'ice', candidate: body.candidate });
+      return sendJson(res, 200, { ok: true });
+    }
+
+    throw httpError(400, 'Неизвестное действие');
   }
 
   throw httpError(404, 'Неизвестный метод API');
