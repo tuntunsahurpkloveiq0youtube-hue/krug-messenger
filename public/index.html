@@ -6,7 +6,13 @@
   <meta name="theme-color" content="#0b0f1a">
   <title>Круг</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/icon-180.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Круг">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="/styles.css?v=3">
 </head>
 <body>
 
@@ -108,6 +114,7 @@
       </div>
 
       <footer class="sidebar-foot">
+        <span class="build-tag" id="build-tag">сборка 3</span>
         <button class="link-btn" id="logout" type="button">Выйти</button>
       </footer>
     </aside>
@@ -126,6 +133,10 @@
           <div class="chat-title">
             <div class="chat-name" id="chat-name"></div>
             <div class="chat-sub" id="chat-sub"></div>
+          </div>
+          <div class="chat-actions" id="chat-actions" hidden>
+            <button class="icon-btn" id="call-audio" type="button" title="Аудиозвонок">📞</button>
+            <button class="icon-btn" id="call-video" type="button" title="Видеозвонок">🎥</button>
           </div>
           <div class="typing" id="typing" hidden></div>
         </header>
@@ -150,6 +161,32 @@
     </main>
   </div>
 
+  <!-- ───────────── Звонок ───────────── -->
+  <div class="call-layer" id="call" hidden>
+    <div class="call-card">
+      <video class="call-remote" id="call-remote" autoplay playsinline hidden></video>
+      <div class="call-kind" id="call-top-kind"></div>
+
+      <div class="call-avatar-stage" id="call-avatar-stage">
+        <div class="call-avatar" id="call-avatar"></div>
+        <div class="call-name" id="call-name"></div>
+        <div class="call-status" id="call-status"></div>
+        <div class="call-waves" id="call-waves" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="call-timer" id="call-timer" hidden></div>
+      </div>
+
+      <video class="call-local" id="call-local" autoplay playsinline muted hidden></video>
+
+      <div class="call-controls">
+        <button class="call-btn" id="call-mic" type="button" title="Микрофон" hidden>🎙️</button>
+        <button class="call-btn" id="call-cam" type="button" title="Камера" hidden>🎥</button>
+        <button class="call-btn accept" id="call-accept" type="button" title="Ответить" hidden>📞</button>
+        <button class="call-btn hangup" id="call-decline" type="button" title="Отклонить" hidden>✖️</button>
+        <button class="call-btn hangup" id="call-hangup" type="button" title="Завершить" hidden>📴</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ───────────── Вспомогательные слои ───────────── -->
   <div class="modal" id="modal" hidden>
     <div class="modal-card" role="dialog" aria-modal="true">
@@ -162,6 +199,6 @@
   <div class="lightbox" id="lightbox" hidden><img id="lightbox-img" alt="Картинка"></div>
   <div class="toast" id="toast" hidden></div>
 
-  <script src="/app.js" type="module"></script>
+  <script src="/app.js?v=3" type="module"></script>
 </body>
 </html>

@@ -236,6 +236,9 @@ const chrome = spawn(
     '--no-default-browser-check',
     '--disable-gpu',
     '--hide-scrollbars',
+    '--use-fake-ui-for-media-stream',
+    '--use-fake-device-for-media-stream',
+    '--autoplay-policy=no-user-gesture-required',
     '--window-size=1360,900',
     'about:blank',
   ],
@@ -377,7 +380,96 @@ try {
   await cdp.shot(path.join(OUT, 'mobile-app.png'));
   console.log('shots/mobile-app.png');
 
-  /* ── 6. Вход по почте (нужен сервер с KRUG_DEV_MAIL=1) ── */
+  /* ── 6. Звонок: второе окно (Боря), входящий вызов и видеосвязь ── */
+  if (process.env.KRUG_SHOT_CALL === '1') {
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1360, height: 900, deviceScaleFactor: 1, mobile: false });
+    await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const li = [...document.querySelectorAll('#dm-list li')].find((x) => (x.dataset.conv || '').startsWith('dm:'));
+      if (li) li.click();
+      await sleep(500);
+      return true;
+    })()`);
+
+    const tabB = await getJson(`http://127.0.0.1:${PORT}/json/new?about:blank`, 'PUT');
+    const wsB = new Ws(tabB.webSocketDebuggerUrl);
+    await wsB.ready;
+    const cdpB = new Cdp(wsB);
+    await cdpB.send('Page.enable');
+    await cdpB.send('Runtime.enable');
+    const loadedB = cdpB.waitEvent('Page.loadEventFired');
+    await cdpB.send('Page.navigate', { url: APP });
+    await loadedB;
+    await cdpB.send('Emulation.setDeviceMetricsOverride', { width: 1360, height: 900, deviceScaleFactor: 1, mobile: false });
+
+    /* у второго окна общий localStorage — сбрасываем его, чтобы войти другим именем */
+    await cdpB.evaluate(`localStorage.clear()`);
+    const reloadedB = cdpB.waitEvent('Page.loadEventFired');
+    await cdpB.send('Page.reload');
+    await reloadedB;
+    await sleep(300);
+
+    const joinedB = await cdpB.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      document.querySelector('#join-name').value = 'Боря';
+      document.querySelector('#join-form').requestSubmit();
+      for (let i = 0; i < 120; i++) {
+        if (!document.querySelector('#app').hidden) return document.querySelector('#me-name').textContent;
+        await sleep(100);
+      }
+      throw new Error('вход второго участника не выполнился');
+    })()`);
+    console.log('второе окно, вошли как:', joinedB);
+
+    await cdpB.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      for (let i = 0; i < 40; i++) {
+        const li = [...document.querySelectorAll('#dm-list li')].find((x) => (x.dataset.conv || '').startsWith('dm:'));
+        if (li) {
+          li.click();
+          await sleep(400);
+          return true;
+        }
+        await sleep(100);
+      }
+      throw new Error('у второго участника нет личных переписок');
+    })()`);
+    await sleep(400);
+
+    await cdp.evaluate(`document.querySelector('#call-video').click()`);
+
+    await cdpB.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      for (let i = 0; i < 150; i++) {
+        if (!document.querySelector('#call').hidden) return true;
+        await sleep(100);
+      }
+      throw new Error('входящий звонок не пришёл');
+    })()`);
+    await sleep(1300);
+    await cdpB.shot(path.join(OUT, 'call-incoming.png'));
+    console.log('shots/call-incoming.png');
+
+    await cdpB.evaluate(`document.querySelector('#call-accept').click()`);
+
+    await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      for (let i = 0; i < 200; i++) {
+        if (document.querySelector('#call-status').textContent === 'Идёт звонок') return true;
+        await sleep(100);
+      }
+      throw new Error('звонок не соединился: ' + document.querySelector('#call-status').textContent);
+    })()`);
+    await sleep(1600);
+    await cdp.shot(path.join(OUT, 'call-video.png'));
+    console.log('shots/call-video.png');
+
+    await cdp.evaluate(`document.querySelector('#call-hangup').click()`);
+    await sleep(700);
+    cdpB.ws.close();
+  }
+
+  /* ── 7. Вход по почте (нужен сервер с KRUG_DEV_MAIL=1) ── */
   if (process.env.KRUG_SHOT_EMAIL === '1') {
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1360, height: 900, deviceScaleFactor: 1, mobile: false });
     await cdp.evaluate(`localStorage.clear()`);

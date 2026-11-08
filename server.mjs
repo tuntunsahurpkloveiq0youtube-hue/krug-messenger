@@ -20,6 +20,10 @@ const PORT = Number(process.env.PORT || 3210);
 const HOST = process.env.HOST || '0.0.0.0';
 const ACCESS_CODE = (process.env.FRIENDS_CODE || '').trim();
 
+/* версия сборки: видно на экране входа и по /api/version — по ней проверяют, обновился ли деплой */
+const APP_VERSION = 3;
+const FEATURES = ['rooms', 'dm', 'presence', 'typing', 'uploads', 'email', 'pwa', 'calls'];
+
 /* вход по почте: либо Resend, либо демо-режим с кодом на экране */
 const RESEND_API_KEY = (process.env.RESEND_API_KEY || '').trim();
 const MAIL_FROM = (process.env.MAIL_FROM || 'Круг <onboarding@resend.dev>').trim();
@@ -321,6 +325,8 @@ const MIME = {
   '.webp': 'image/webp',
   '.ico': 'image/x-icon',
   '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
 };
 
 function sendJson(res, status, obj) {
@@ -451,6 +457,10 @@ async function handleApi(req, res, url, pathname) {
 
   if (pathname === '/api/health' && method === 'GET') {
     return sendJson(res, 200, { ok: true, uptime: process.uptime() });
+  }
+
+  if (pathname === '/api/version' && method === 'GET') {
+    return sendJson(res, 200, { version: APP_VERSION, features: FEATURES, started: process.uptime() });
   }
 
   /* ── вход ── */
