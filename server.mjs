@@ -21,8 +21,11 @@ const HOST = process.env.HOST || '0.0.0.0';
 const ACCESS_CODE = (process.env.FRIENDS_CODE || '').trim();
 
 /* версия сборки: видно на экране входа и по /api/version — по ней проверяют, обновился ли деплой */
-const APP_VERSION = 3;
-const FEATURES = ['rooms', 'dm', 'presence', 'typing', 'uploads', 'email', 'pwa', 'calls'];
+const APP_VERSION = 4;
+const FEATURES = [
+  'rooms', 'dm', 'presence', 'typing', 'uploads', 'email', 'pwa', 'calls',
+  'password', 'replies', 'reactions', 'edit', 'voice', 'profile', 'theme', 'turn', 'chat-info', 'search',
+];
 
 /* вход по почте: либо Resend, либо демо-режим с кодом на экране */
 const RESEND_API_KEY = (process.env.RESEND_API_KEY || '').trim();
@@ -33,10 +36,37 @@ const CODE_TTL = 10 * 60 * 1000;
 const CODE_COOLDOWN = 60 * 1000;
 const CODE_MAX_PER_HOUR = 5;
 
+/* TURN-сервер: нужен, чтобы звонки проходили между разными сетями */
+const TURN_URLS = (process.env.TURN_URLS || process.env.TURN_URL || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const TURN_USERNAME = (process.env.TURN_USERNAME || '').trim();
+const TURN_CREDENTIAL = (process.env.TURN_CREDENTIAL || '').trim();
+
+function iceServers() {
+  const list = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+  if (TURN_URLS.length) {
+    const turn = { urls: TURN_URLS };
+    if (TURN_USERNAME) turn.username = TURN_USERNAME;
+    if (TURN_CREDENTIAL) turn.credential = TURN_CREDENTIAL;
+    list.push(turn);
+  }
+  return list;
+}
+
 const MAX_TEXT = 4000;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
+const MAX_AVATAR_BYTES = 1024 * 1024;
+const MAX_STATUS = 140;
 const CONV_CAP = 2000;
 const HISTORY_DEFAULT = 50;
+const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
+
+/* ограничение частоты по адресу клиента — для входа и чувствительных ручек */
+const AUTH_WINDOW = 10 * 60 * 1000;
+const AUTH_MAX = 30;
 
 const PALETTE = [
   '#7c8cff', '#a78bfa', '#f472b6', '#fb7185', '#fb923c',
@@ -113,6 +143,129 @@ function colorFor(key) {
   let h = 0;
   for (const ch of key) h = (h * 31 + ch.codePointAt(0)) >>> 0;
   return PALETTE[h % PALETTE.length];
+}
+
+/* ── пароли: scrypt из стандартной библиотеки, без внешних зависимостей ── */
+
+const SCRYPT_N = 16384;
+const SCRYPT_r = 8;
+const SCRYPT_p = 1;
+const SCRYPT_KEYLEN = 32;
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(String(password), salt, SCRYPT_KEYLEN, {
+    N: SCRYPT_N, r: SCRYPT_r, p: SCRYPT_p,
+  });
+  return ['scrypt', SCRYPT_N, SCRYPT_r, SCRYPT_p, salt.toString('base64'), hash.toString('base64')].join('$');
+}
+
+function verifyPassword(password, stored) {
+  if (!stored) return false;
+  const parts = String(stored).split('$');
+  if (parts.length !== 6 || parts[0] !== 'scrypt') return false;
+  const [, n, r, p, saltB64, hashB64] = parts;
+  const salt = Buffer.from(saltB64, 'base64');
+  const expected = Buffer.from(hashB64, 'base64');
+  let actual;
+  try {
+    actual = crypto.scryptSync(String(password), salt, expected.length, {
+      N: Number(n), r: Number(r), p: Number(p),
+    });
+  } catch {
+    return false;
+  }
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+
+function checkPassword(value) {
+  const pw = String(value ?? '');
+  if (pw.length < 6) throw httpError(400, 'Пароль — не короче 6 символов');
+  if (pw.length > 100) throw httpError(400, 'Слишком длинный пароль');
+  return pw;
+}
+
+/* ── лимит частоты по адресу клиента (вход, регистрация) ── */
+
+const authHits = new Map(); // ip -> [ts]
+
+function clientIp(req) {
+  const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return fwd || req.socket.remoteAddress || 'unknown';
+}
+
+function authRateLimit(req) {
+  const ip = clientIp(req);
+  const now = Date.now();
+  const arr = (authHits.get(ip) || []).filter((t) => now - t < AUTH_WINDOW);
+  if (arr.length >= AUTH_MAX) throw httpError(429, 'Слишком много попыток входа. Подождите 10 минут');
+  arr.push(now);
+  authHits.set(ip, arr);
+}
+
+/* ── проверка файлов по сигнатуре, а не по заявленному типу ── */
+
+function sniffImage(buf) {
+  if (buf.length < 12) return null;
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'png';
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpg';
+  if (buf.slice(0, 3).toString('latin1') === 'GIF') return 'gif';
+  if (buf.slice(0, 4).toString('latin1') === 'RIFF' && buf.slice(8, 12).toString('latin1') === 'WEBP') return 'webp';
+  return null;
+}
+
+function sniffAudio(buf) {
+  if (buf.length < 16) return null;
+  if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return 'webm';
+  if (buf.slice(0, 4).toString('latin1') === 'RIFF' && buf.slice(8, 12).toString('latin1') === 'WAVE') return 'wav';
+  if (buf.slice(0, 4).toString('latin1') === 'OggS') return 'ogg';
+  if (buf.slice(4, 8).toString('latin1') === 'ftyp') return 'm4a';
+  if (buf.slice(0, 3).toString('latin1') === 'ID3') return 'mp3';
+  if (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0) return 'mp3';
+  if (buf.slice(0, 4).toString('latin1') === 'fLaC') return 'flac';
+  return null;
+}
+
+function dataUrlToBuffer(dataUrl, pattern) {
+  const m = pattern.exec(String(dataUrl || ''));
+  if (!m) return null;
+  const payload = m[2] ?? m[1];
+  if (!payload) return null;
+  return Buffer.from(payload, 'base64');
+}
+
+/* ── публичные данные пользователя ── */
+
+function publicUser(key) {
+  const u = db.users[key];
+  if (!u) return { key, name: key, color: '#64748b' };
+  return {
+    key,
+    name: u.name,
+    color: u.color,
+    avatar: u.avatar || '',
+    status: u.status || '',
+    online: isOnline(key),
+    lastSeen: u.lastSeen || 0,
+  };
+}
+
+function broadcastUsers() {
+  const users = Object.keys(db.users).map((k) => publicUser(k));
+  broadcast({ type: 'users', users });
+}
+
+function isMuted(key, conv) {
+  const u = db.users[key];
+  return Boolean(u && u.mutes && u.mutes[conv]);
+}
+
+function setMuted(key, conv, on) {
+  const u = db.users[key];
+  if (!u) return;
+  u.mutes ??= {};
+  if (on) u.mutes[conv] = true;
+  else delete u.mutes[conv];
 }
 
 /* ── почта ── */
@@ -371,7 +524,7 @@ async function serveStatic(res, pathname) {
 
 async function serveUpload(res, pathname) {
   const name = path.basename(pathname);
-  if (!/^[a-f0-9]{16}\.(png|jpg|gif|webp)$/.test(name)) return notFound(res);
+  if (!/^[a-f0-9]{16}\.(png|jpg|gif|webp|webm|ogg|m4a|mp3|flac)$/.test(name)) return notFound(res);
   let data;
   try {
     data = await fsp.readFile(path.join(UPLOAD_DIR, name));
@@ -379,8 +532,15 @@ async function serveUpload(res, pathname) {
     return notFound(res);
   }
   const ext = path.extname(name).toLowerCase();
+  const AUDIO_MIME = {
+    '.webm': 'audio/webm',
+    '.ogg': 'audio/ogg',
+    '.m4a': 'audio/mp4',
+    '.mp3': 'audio/mpeg',
+    '.flac': 'audio/flac',
+  };
   res.writeHead(200, {
-    'Content-Type': MIME[ext] || 'application/octet-stream',
+    'Content-Type': MIME[ext] || AUDIO_MIME[ext] || 'application/octet-stream',
     'Cache-Control': 'public, max-age=31536000, immutable',
     'X-Content-Type-Options': 'nosniff',
     'Content-Length': data.length,
@@ -431,15 +591,31 @@ function auth(req, url) {
   return s;
 }
 
-async function saveImage(dataUrl) {
-  const m = /^data:image\/(png|jpe?g|gif|webp);base64,([A-Za-z0-9+/=\s]+)$/.exec(String(dataUrl));
-  if (!m) throw httpError(400, 'Поддерживаются PNG, JPEG, GIF и WebP');
-  const ext = m[1] === 'jpeg' || m[1] === 'jpg' ? 'jpg' : m[1];
-  const buf = Buffer.from(m[2], 'base64');
-  if (buf.length > MAX_IMAGE_BYTES) throw httpError(413, 'Картинка больше 5 МБ');
+const IMAGE_DATA_URL = /^data:image\/(png|jpe?g|gif|webp);base64,([A-Za-z0-9+/=\s]+)$/;
+const AUDIO_DATA_URL = /^data:audio\/[a-z0-9.+-]+;base64,([A-Za-z0-9+/=\s]+)$/i;
+
+async function storeFile(buf, ext) {
   const name = crypto.randomBytes(8).toString('hex') + '.' + ext;
   await fsp.writeFile(path.join(UPLOAD_DIR, name), buf);
   return '/uploads/' + name;
+}
+
+async function saveImage(dataUrl, maxBytes = MAX_IMAGE_BYTES, limitMessage = 'Картинка больше 5 МБ') {
+  const buf = dataUrlToBuffer(dataUrl, IMAGE_DATA_URL);
+  if (!buf) throw httpError(400, 'Поддерживаются PNG, JPEG, GIF и WebP');
+  const ext = sniffImage(buf);
+  if (!ext) throw httpError(400, 'Файл не похож на картинку');
+  if (buf.length > maxBytes) throw httpError(413, limitMessage);
+  return storeFile(buf, ext);
+}
+
+async function saveAudio(dataUrl) {
+  const buf = dataUrlToBuffer(dataUrl, AUDIO_DATA_URL);
+  if (!buf) throw httpError(400, 'Не удалось прочитать голосовое сообщение');
+  const ext = sniffAudio(buf);
+  if (!ext) throw httpError(400, 'Поддерживаются голосовые в WebM, OGG, M4A и MP3');
+  if (buf.length > MAX_AUDIO_BYTES) throw httpError(413, 'Голосовое больше 8 МБ');
+  return storeFile(buf, ext);
 }
 
 /* ────────────────────────────  МАРШРУТЫ  ──────────────────────────── */
@@ -451,7 +627,10 @@ async function handleApi(req, res, url, pathname) {
     return sendJson(res, 200, {
       codeRequired: Boolean(ACCESS_CODE),
       emailAuth: EMAIL_AUTH,
+      passwordAuth: true,
       devMail: DEV_MAIL && !RESEND_API_KEY,
+      version: APP_VERSION,
+      rtc: { iceServers: iceServers() },
     });
   }
 
@@ -464,7 +643,9 @@ async function handleApi(req, res, url, pathname) {
   }
 
   /* ── вход ── */
+  /* ── вход по имени и паролю ── */
   if (pathname === '/api/join' && method === 'POST') {
+    authRateLimit(req);
     const body = await readBody(req, 64 * 1024);
     const raw = String(body.name ?? '').trim().replace(/\s+/g, ' ');
     if (!/^[\p{L}\p{N} ._'-]{2,20}$/u.test(raw)) {
@@ -475,20 +656,33 @@ async function handleApi(req, res, url, pathname) {
     }
     const key = raw.toLowerCase();
     let user = db.users[key];
-    if (!user) {
-      user = { name: raw, color: colorFor(key), createdAt: Date.now() };
+    const created = !user;
+
+    if (created) {
+      const pw = checkPassword(body.password);
+      user = { name: raw, color: colorFor(key), createdAt: Date.now(), pass: hashPassword(pw) };
       db.users[key] = user;
+    } else {
+      // старым записям без пароля пароль задаётся при первом входе
+      if (!user.pass) {
+        const pw = checkPassword(body.password);
+        user.pass = hashPassword(pw);
+      } else if (!verifyPassword(String(body.password ?? ''), user.pass)) {
+        throw httpError(401, 'Неверный пароль');
+      }
     }
+
     user.lastSeen = Date.now();
     const token = crypto.randomBytes(24).toString('hex');
     sessions.set(token, { key, token, conns: new Set() });
     save();
-    return sendJson(res, 200, { token, me: { name: user.name, color: user.color, key } });
+    return sendJson(res, 200, { token, created, me: publicUser(key) });
   }
 
   /* ── вход по почте: запросить код ── */
   if (pathname === '/api/auth/email' && method === 'POST') {
     if (!EMAIL_AUTH) throw httpError(404, 'Вход по почте не настроен');
+    authRateLimit(req);
     const body = await readBody(req, 16 * 1024);
     if (ACCESS_CODE && String(body.code ?? '').trim() !== ACCESS_CODE) {
       throw httpError(403, 'Неверный код доступа');
@@ -548,7 +742,7 @@ async function handleApi(req, res, url, pathname) {
     return sendJson(res, 200, {
       token,
       created,
-      me: { name: user.name, color: user.color, key: email, email },
+      me: { ...publicUser(email), email },
     });
   }
 
@@ -561,33 +755,37 @@ async function handleApi(req, res, url, pathname) {
       name: r.name,
       unread: unreadFor(key, r.id),
       lastTs: lastTs(r.id),
+      muted: isMuted(key, r.id),
     }));
     const dms = db.dms
       .filter((d) => d.keys.includes(key))
       .map((d) => {
         const otherKey = d.keys.find((k) => k !== key);
-        const other = db.users[otherKey] || { name: otherKey, color: '#64748b' };
+        const other = publicUser(otherKey);
         return {
           id: d.id,
           name: other.name,
           color: other.color,
+          avatar: other.avatar,
+          status: other.status,
           key: otherKey,
-          online: isOnline(otherKey),
+          online: other.online,
           unread: unreadFor(key, d.id),
           lastTs: lastTs(d.id),
+          muted: isMuted(key, d.id),
+          createdAt: d.createdAt || 0,
         };
       })
       .sort((a, b) => b.lastTs - a.lastTs);
-    const users = Object.entries(db.users)
-      .map(([k, u]) => ({ key: k, name: u.name, color: u.color, online: isOnline(k), lastSeen: u.lastSeen || 0 }))
-      .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
-    const me = db.users[key];
+    const users = Object.keys(db.users).map((k) => publicUser(k)).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+    const meUser = db.users[key];
     return sendJson(res, 200, {
-      me: { name: me.name, color: me.color, key },
+      me: { ...publicUser(key), email: meUser.email || '', createdAt: meUser.createdAt || 0 },
       rooms,
       dms,
       users,
       online: onlineList(),
+      reactions: REACTIONS,
     });
   }
 
@@ -601,13 +799,12 @@ async function handleApi(req, res, url, pathname) {
     });
     res.write('retry: 2000\n\n');
     s.conns.add(res);
-    const me = db.users[s.key];
     res.write(
       'data: ' +
         JSON.stringify({
           type: 'hello',
           online: onlineList(),
-          me: { name: me.name, color: me.color, key: s.key },
+          me: publicUser(s.key),
         }) +
         '\n\n',
     );
@@ -632,9 +829,21 @@ async function handleApi(req, res, url, pathname) {
   if (pathname === '/api/messages' && method === 'GET') {
     const conv = url.searchParams.get('conv') || '';
     assertMember(s.key, conv);
+    const all = db.messages[conv] || [];
+
+    const q = String(url.searchParams.get('q') || '').trim().toLowerCase();
+    if (q) {
+      if (q.length < 2) throw httpError(400, 'Для поиска нужно минимум 2 символа');
+      const found = [];
+      for (let i = all.length - 1; i >= 0 && found.length < 60; i--) {
+        const m = all[i];
+        if ((m.text || '').toLowerCase().includes(q)) found.push(m);
+      }
+      return sendJson(res, 200, { messages: found.reverse(), hasMore: false, query: q });
+    }
+
     const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || HISTORY_DEFAULT));
     const before = Number(url.searchParams.get('before')) || 0;
-    const all = db.messages[conv] || [];
     const filtered = before ? all.filter((m) => m.ts < before) : all;
     const hasMore = filtered.length > limit;
     const messages = filtered.slice(-limit);
@@ -648,9 +857,19 @@ async function handleApi(req, res, url, pathname) {
     assertMember(s.key, conv);
     let text = String(body.text ?? '').replace(/\r\n/g, '\n').trim();
     if (text.length > MAX_TEXT) throw httpError(400, `Сообщение длиннее ${MAX_TEXT} символов`);
+
     let image = null;
     if (body.image) image = await saveImage(body.image);
-    if (!text && !image) throw httpError(400, 'Пустое сообщение');
+
+    let audio = null;
+    let dur = 0;
+    if (body.audio) {
+      audio = await saveAudio(body.audio);
+      dur = Math.min(600, Math.max(0, Math.round(Number(body.dur) || 0)));
+    }
+
+    if (!text && !image && !audio) throw httpError(400, 'Пустое сообщение');
+
     const msg = {
       id: crypto.randomBytes(8).toString('hex'),
       conv,
@@ -660,6 +879,31 @@ async function handleApi(req, res, url, pathname) {
       ts: Date.now(),
     };
     if (image) msg.image = image;
+    if (audio) {
+      msg.audio = audio;
+      msg.dur = dur;
+    }
+
+    const replySource =
+      typeof body.replyTo === 'string'
+        ? body.replyTo
+        : body.replyTo && body.replyTo.id
+          ? String(body.replyTo.id)
+          : '';
+    if (replySource) {
+      const src = (db.messages[conv] || []).find((m) => m.id === replySource);
+      if (src) {
+        msg.replyTo = {
+          id: src.id,
+          name: src.from,
+          fromKey: src.fromKey,
+          text: (src.text || '').slice(0, 160),
+          image: Boolean(src.image),
+          audio: Boolean(src.audio),
+        };
+      }
+    }
+
     const arr = (db.messages[conv] ??= []);
     arr.push(msg);
     if (arr.length > CONV_CAP) arr.splice(0, arr.length - CONV_CAP);
@@ -667,6 +911,48 @@ async function handleApi(req, res, url, pathname) {
     save();
     broadcast({ type: 'message', message: msg }, convFilter(conv));
     return sendJson(res, 200, { message: msg });
+  }
+
+  /* ── правка своего сообщения ── */
+  const editMatch = /^\/api\/messages\/([a-f0-9]{16})$/.exec(pathname);
+  if (editMatch && method === 'PATCH') {
+    const body = await readBody(req, 64 * 1024);
+    const conv = String(body.conv ?? '');
+    assertMember(s.key, conv);
+    const msg = (db.messages[conv] || []).find((m) => m.id === editMatch[1]);
+    if (!msg) throw httpError(404, 'Сообщение не найдено');
+    if (msg.fromKey !== s.key) throw httpError(403, 'Можно править только свои сообщения');
+    const text = String(body.text ?? '').replace(/\r\n/g, '\n').trim();
+    if (!text) throw httpError(400, 'Сообщение не может быть пустым');
+    if (text.length > MAX_TEXT) throw httpError(400, `Сообщение длиннее ${MAX_TEXT} символов`);
+    msg.text = text;
+    msg.editedAt = Date.now();
+    save();
+    broadcast({ type: 'message-edited', conv, id: msg.id, text: msg.text, editedAt: msg.editedAt }, convFilter(conv));
+    return sendJson(res, 200, { message: msg });
+  }
+
+  /* ── реакции ── */
+  const reactMatch = /^\/api\/messages\/([a-f0-9]{16})\/react$/.exec(pathname);
+  if (reactMatch && method === 'POST') {
+    const body = await readBody(req, 16 * 1024);
+    const conv = String(body.conv ?? '');
+    assertMember(s.key, conv);
+    const emoji = String(body.emoji ?? '');
+    if (!REACTIONS.includes(emoji)) throw httpError(400, 'Такой реакции нет');
+    const msg = (db.messages[conv] || []).find((m) => m.id === reactMatch[1]);
+    if (!msg) throw httpError(404, 'Сообщение не найдено');
+    msg.reactions ??= {};
+    const list = msg.reactions[emoji] || [];
+    const idx = list.indexOf(s.key);
+    if (idx === -1) list.push(s.key);
+    else list.splice(idx, 1);
+    if (list.length) msg.reactions[emoji] = list;
+    else delete msg.reactions[emoji];
+    if (!Object.keys(msg.reactions).length) delete msg.reactions;
+    save();
+    broadcast({ type: 'message-reactions', conv, id: msg.id, reactions: msg.reactions || {} }, convFilter(conv));
+    return sendJson(res, 200, { reactions: msg.reactions || {} });
   }
 
   const delMatch = /^\/api\/messages\/([a-f0-9]{16})$/.exec(pathname);
@@ -745,11 +1031,91 @@ async function handleApi(req, res, url, pathname) {
         id,
         name: other.name,
         color: other.color,
+        avatar: other.avatar || '',
+        status: other.status || '',
         key: otherKey,
         online: isOnline(otherKey),
         unread: unreadFor(s.key, id),
         lastTs: lastTs(id),
+        muted: isMuted(s.key, id),
+        createdAt: dm.createdAt || 0,
       },
+    });
+  }
+
+  /* ── профиль: статус и аватар ── */
+  if (pathname === '/api/me' && method === 'POST') {
+    const body = await readBody(req, 2 * 1024 * 1024);
+    const user = db.users[s.key];
+    if (!user) throw httpError(404, 'Пользователь не найден');
+
+    if (body.status !== undefined) {
+      const status = String(body.status ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (status.length > MAX_STATUS) throw httpError(400, `Статус — до ${MAX_STATUS} символов`);
+      user.status = status;
+    }
+    if (body.avatar !== undefined) {
+      if (body.avatar === null || body.avatar === '') {
+        user.avatar = '';
+      } else {
+        user.avatar = await saveImage(body.avatar, MAX_AVATAR_BYTES, 'Аватар больше 1 МБ');
+      }
+    }
+    save();
+    broadcastUsers();
+    return sendJson(res, 200, { me: { ...publicUser(s.key), email: user.email || '' } });
+  }
+
+  /* ── отключить уведомления для чата ── */
+  if (pathname === '/api/mute' && method === 'POST') {
+    const body = await readBody(req, 16 * 1024);
+    const conv = String(body.conv ?? '');
+    assertMember(s.key, conv);
+    setMuted(s.key, conv, Boolean(body.on));
+    save();
+    return sendJson(res, 200, { conv, muted: isMuted(s.key, conv) });
+  }
+
+  /* ── информация о чате ── */
+  if (pathname === '/api/chat' && method === 'GET') {
+    const conv = url.searchParams.get('conv') || '';
+    assertMember(s.key, conv);
+    const msgs = db.messages[conv] || [];
+
+    if (conv.startsWith('room:')) {
+      const room = db.rooms.find((r) => r.id === conv);
+      if (!room) throw httpError(404, 'Канал не найден');
+      const authors = new Map();
+      for (const m of msgs) if (!authors.has(m.fromKey)) authors.set(m.fromKey, m.from);
+      return sendJson(res, 200, {
+        kind: 'room',
+        id: room.id,
+        name: room.name,
+        createdAt: room.createdAt || 0,
+        createdBy: room.createdBy === 'system' ? 'сервер' : (db.users[room.createdBy] || {}).name || '',
+        messageCount: msgs.length,
+        members: [...authors.entries()].map(([key, name]) => ({ key, name })),
+        totalUsers: Object.keys(db.users).length,
+        muted: isMuted(s.key, conv),
+      });
+    }
+
+    const other = dmPartners(conv).find((k) => k !== s.key);
+    const u = publicUser(other);
+    const dm = db.dms.find((d) => d.id === conv);
+    return sendJson(res, 200, {
+      kind: 'dm',
+      id: conv,
+      name: u.name,
+      color: u.color,
+      avatar: u.avatar,
+      status: u.status,
+      createdAt: (dm && dm.createdAt) || 0,
+      messageCount: msgs.length,
+      firstMessageAt: msgs.length ? msgs[0].ts : 0,
+      online: u.online,
+      lastSeen: u.lastSeen,
+      muted: isMuted(s.key, conv),
     });
   }
 
@@ -859,6 +1225,9 @@ const heartbeat = setInterval(() => {
   }
   for (const [email, entry] of loginCodes) {
     if (entry.exp < now - 60 * 60 * 1000) loginCodes.delete(email);
+  }
+  for (const [ip, arr] of authHits) {
+    if (!arr.some((t) => now - t < AUTH_WINDOW)) authHits.delete(ip);
   }
 }, 25_000);
 heartbeat.unref();

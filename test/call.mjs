@@ -117,9 +117,9 @@ try {
   check('сервер запускается', await waitForServer());
   if (failed) throw new Error('сервер не поднялся');
 
-  const anna = (await api('/api/join', { method: 'POST', body: { name: 'Аня' } })).data.token;
-  const boris = (await api('/api/join', { method: 'POST', body: { name: 'Боря' } })).data.token;
-  const vera = (await api('/api/join', { method: 'POST', body: { name: 'Вика' } })).data.token;
+  const anna = (await api('/api/join', { method: 'POST', body: { name: 'Аня', password: 'secret123' } })).data.token;
+  const boris = (await api('/api/join', { method: 'POST', body: { name: 'Боря', password: 'secret123' } })).data.token;
+  const vera = (await api('/api/join', { method: 'POST', body: { name: 'Вика', password: 'secret123' } })).data.token;
 
   const noAuth = await api('/api/call', { method: 'POST', body: { action: 'invite', to: 'боря' } });
   check('звонок без токена — 401', noAuth.status === 401);

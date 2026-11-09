@@ -113,7 +113,7 @@ try {
   r = await call(demo.base, '/api/auth/verify', { method: 'POST', body: { email: 'anya@work.example.org', code: code2 } });
   check('имя не дублируется: «anya 2»', r.data?.me?.name === 'anya 2', r.data?.me?.name);
 
-  r = await call(demo.base, '/api/join', { method: 'POST', body: { name: 'Гость' } });
+  r = await call(demo.base, '/api/join', { method: 'POST', body: { name: 'Гость', password: 'secret123' } });
   check('вход по имени рядом работает', r.status === 200 && !!r.data?.token);
 } finally {
   demo.stop();

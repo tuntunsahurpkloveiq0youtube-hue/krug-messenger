@@ -80,12 +80,12 @@ try {
   const health = await api('/api/health');
   check('GET /api/health — ok', health.status === 200 && health.data?.ok === true);
 
-  const bad = await api('/api/join', { method: 'POST', body: { name: 'x' } });
+  const bad = await api('/api/join', { method: 'POST', body: { name: 'x', password: 'secret123' } });
   check('вход с коротким именем отклоняется (400)', bad.status === 400);
 
-  const a = await api('/api/join', { method: 'POST', body: { name: 'Аня' } });
+  const a = await api('/api/join', { method: 'POST', body: { name: 'Аня', password: 'secret123' } });
   check('вход Ани (200 + token)', a.status === 200 && typeof a.data?.token === 'string');
-  const b = await api('/api/join', { method: 'POST', body: { name: 'Боря' } });
+  const b = await api('/api/join', { method: 'POST', body: { name: 'Боря', password: 'secret123' } });
   check('вход Бори (200 + token)', b.status === 200 && typeof b.data?.token === 'string');
 
   const noAuth = await api('/api/state');
@@ -124,14 +124,14 @@ try {
   const dmsg = await api('/api/messages', { method: 'POST', token: a.data.token, body: { conv: dm.data.dm.id, text: 'Только для тебя' } });
   check('личное сообщение отправляется', dmsg.status === 200);
 
-  const c = await api('/api/join', { method: 'POST', body: { name: 'Вика' } });
+  const c = await api('/api/join', { method: 'POST', body: { name: 'Вика', password: 'secret123' } });
   const peek = await api(`/api/messages?conv=${encodeURIComponent(dm.data.dm.id)}`, { token: c.data.token });
   check('посторонний не читает чужой ЛС (403)', peek.status === 403 || peek.status === 404);
 
-  const room = await api('/api/rooms', { method: 'POST', token: a.data.token, body: { name: 'Кино' } });
+  const room = await api('/api/rooms', { method: 'POST', token: a.data.token, body: { name: 'Кино', password: 'secret123' } });
   check('создание канала', room.status === 200 && room.data?.room?.name === 'Кино');
 
-  const dup = await api('/api/rooms', { method: 'POST', token: b.data.token, body: { name: 'кино' } });
+  const dup = await api('/api/rooms', { method: 'POST', token: b.data.token, body: { name: 'кино', password: 'secret123' } });
   check('дубль канала отклоняется (409)', dup.status === 409);
 
   /* удаление и картинки */
@@ -223,7 +223,7 @@ try {
   const js = await fetch(BASE + '/app.js');
   check('app.js отдаётся', js.status === 200);
 
-  const save = await api('/api/join', { method: 'POST', body: { name: 'Гоша' } });
+  const save = await api('/api/join', { method: 'POST', body: { name: 'Гоша', password: 'secret123' } });
   await new Promise((r) => setTimeout(r, 500)); // запись в файл отложена на 200 мс
   const db = JSON.parse(fs.readFileSync(path.join(tmp, 'db.json'), 'utf8'));
   check('данные сохраняются в db.json', Boolean(db.users['гоша']) && save.status === 200);

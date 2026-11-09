@@ -276,6 +276,7 @@ try {
   const joined = await cdp.evaluate(`(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     document.querySelector('#join-name').value = 'Аня';
+    document.querySelector('#join-pass').value = 'krug-demo-1';
     document.querySelector('#join-form').requestSubmit();
     for (let i = 0; i < 120; i++) {
       if (!document.querySelector('#app').hidden) return document.querySelector('#me-name').textContent;
@@ -299,12 +300,14 @@ try {
       return r.json();
     };
     const post = (token, conv, text) => call('/api/messages', { method: 'POST', token, body: { conv, text } });
-    const join = async (name) => (await call('/api/join', { method: 'POST', token: 'x', body: { name } })).token;
+    const join = async (name) =>
+      (await call('/api/join', { method: 'POST', token: 'x', body: { name, password: 'krug-demo-1' } })).token;
 
     const b = await join('Боря');
     const v = await join('Вика');
     const s = await join('Слава');
     window.__friends = [b, v, s].map((t) => new EventSource('/api/events?token=' + t));
+    window.__tokens = { b, v, s };
     await sleep(300);
 
     await post(b, 'room:general', 'Всем привет! Кто в пятницу свободен?');
@@ -363,6 +366,107 @@ try {
   await cdp.shot(path.join(OUT, 'emoji.png'));
   console.log('shots/emoji.png');
 
+  /* ── 4.1 Меню, поиск, реакции, голосовое, светлая тема ── */
+  const rich = await cdp.evaluate(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const myToken = localStorage.getItem('fm_token');
+    const call = async (p, o = {}) => {
+      const r = await fetch(p, {
+        method: o.method || 'GET',
+        headers: { 'content-type': 'application/json', 'x-token': o.token || myToken },
+        body: o.body ? JSON.stringify(o.body) : undefined,
+      });
+      if (!r.ok) throw new Error(p + ' -> ' + r.status);
+      return r.json();
+    };
+    const pop = document.querySelector('#emoji-pop');
+    if (pop && !pop.hidden) document.querySelector('#emoji-btn').click();
+    await sleep(150);
+
+    const dmLi = [...document.querySelectorAll('#dm-list li')].find((x) => (x.dataset.conv || '').startsWith('dm:'));
+    if (!dmLi) throw new Error('нет личного чата');
+    dmLi.click();
+    await sleep(600);
+    const conv = dmLi.dataset.conv;
+
+    const b = window.__tokens.b;
+    const hist = await call('/api/messages?conv=' + encodeURIComponent(conv));
+    const mineMsg = hist.messages.filter((m) => m.fromKey === 'аня').pop();
+    const borisMsg = hist.messages.filter((m) => m.fromKey === 'боря')[0];
+
+    await call('/api/messages', {
+      method: 'POST',
+      token: b,
+      body: { conv, text: 'Скину фото обложки вечером', replyTo: { id: mineMsg.id } },
+    });
+    await call('/api/messages/' + mineMsg.id + '/react', { method: 'POST', token: b, body: { conv, emoji: '❤️' } });
+    await call('/api/messages/' + borisMsg.id + '/react', { method: 'POST', token: b, body: { conv, emoji: '🔥' } });
+
+    const bytes = [0x1a, 0x45, 0xdf, 0xa3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let bin = '';
+    for (const x of bytes) bin += String.fromCharCode(x);
+    await call('/api/messages', { method: 'POST', body: { conv, audio: 'data:audio/webm;base64,' + btoa(bin), dur: 7 } });
+
+    const general = [...document.querySelectorAll('#room-list li')].find((x) => x.dataset.conv === 'room:general');
+    if (general) general.click();
+    await sleep(350);
+    dmLi.click();
+    await sleep(800);
+
+    const rows = [...document.querySelectorAll('.msg')];
+    const target = rows.find((r) => r.querySelector('.reaction'));
+    if (target) target.classList.add('actions-open');
+    await sleep(250);
+    return { conv, rows: rows.length };
+  })()`);
+  console.log('наполнили чат:', rich);
+
+  await cdp.shot(path.join(OUT, 'msg-actions.png'));
+  console.log('shots/msg-actions.png');
+
+  await cdp.evaluate(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    document.querySelectorAll('.msg.actions-open').forEach((n) => n.classList.remove('actions-open'));
+    document.querySelector('#chat-menu').click();
+    await sleep(350);
+    return true;
+  })()`);
+  await cdp.shot(path.join(OUT, 'chat-menu.png'));
+  console.log('shots/chat-menu.png');
+
+  await cdp.evaluate(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const item = [...document.querySelectorAll('.chat-menu-item')].find((b) => b.textContent.includes('Поиск'));
+    if (item) item.click();
+    await sleep(300);
+    const input = document.querySelector('#chat-search-input');
+    input.value = 'книг';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(800);
+    return document.querySelectorAll('.search-row').length;
+  })()`);
+  await cdp.shot(path.join(OUT, 'chat-search.png'));
+  console.log('shots/chat-search.png');
+
+  await cdp.evaluate(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const close = document.querySelector('#chat-search-close');
+    if (close) close.click();
+    await sleep(250);
+    document.querySelector('#theme-toggle').click();
+    await sleep(500);
+    return document.documentElement.dataset.theme;
+  })()`);
+  await cdp.shot(path.join(OUT, 'light-theme.png'));
+  console.log('shots/light-theme.png');
+
+  await cdp.evaluate(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    document.querySelector('#theme-toggle').click();
+    await sleep(300);
+    return document.documentElement.dataset.theme;
+  })()`);
+
   /* ── 5. Мобильный вид с открытым чатом ── */
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await sleep(400);
@@ -412,6 +516,7 @@ try {
     const joinedB = await cdpB.evaluate(`(async () => {
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       document.querySelector('#join-name').value = 'Боря';
+      document.querySelector('#join-pass').value = 'krug-demo-1';
       document.querySelector('#join-form').requestSubmit();
       for (let i = 0; i < 120; i++) {
         if (!document.querySelector('#app').hidden) return document.querySelector('#me-name').textContent;

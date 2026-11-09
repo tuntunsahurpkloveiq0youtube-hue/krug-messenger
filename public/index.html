@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Круг">
   <meta name="mobile-web-app-capable" content="yes">
-  <link rel="stylesheet" href="/styles.css?v=3">
+  <link rel="stylesheet" href="/styles.css?v=4">
 </head>
 <body>
 
@@ -38,10 +38,16 @@
         <label class="field">
           <span>Ваше имя</span>
           <input id="join-name" name="nickname" maxlength="20" required
-                 placeholder="Например, Аня" autocomplete="nickname" spellcheck="false">
+                 placeholder="Например, Аня" autocomplete="username" spellcheck="false">
+        </label>
+        <label class="field">
+          <span>Пароль</span>
+          <input id="join-pass" name="password" type="password" minlength="6" maxlength="100" required
+                 placeholder="Не короче 6 символов" autocomplete="current-password">
         </label>
         <button class="primary" id="join-btn" type="submit">Войти</button>
         <p class="form-error" id="join-error" role="alert"></p>
+        <p class="hint hint-small" id="join-note">Новое имя — регистрация, старое — вход по паролю.</p>
       </form>
 
       <form id="email-form" autocomplete="on" data-pane="email" hidden>
@@ -79,11 +85,12 @@
   <div id="app" class="app" hidden>
     <aside id="sidebar" class="sidebar">
       <header class="me">
-        <div class="avatar" id="me-avatar"></div>
+        <button class="avatar avatar-btn" id="me-avatar" type="button" title="Профиль"></button>
         <div class="me-info">
           <div class="me-name" id="me-name"></div>
           <div class="me-status" id="me-status">в сети</div>
         </div>
+        <button class="icon-btn" id="theme-toggle" type="button" title="Светлая тема">☀️</button>
         <button class="icon-btn" id="sound-toggle" type="button" title="Звук уведомлений">🔔</button>
       </header>
 
@@ -110,11 +117,12 @@
             <span>В сети <span class="pill" id="online-count">0</span></span>
           </div>
           <ul id="online-list" class="conv-list"></ul>
+          <p class="empty-note" id="online-empty" hidden>Все друзья уже в личных сообщениях.</p>
         </section>
       </div>
 
       <footer class="sidebar-foot">
-        <span class="build-tag" id="build-tag">сборка 3</span>
+        <span class="build-tag" id="build-tag">сборка 4</span>
         <button class="link-btn" id="logout" type="button">Выйти</button>
       </footer>
     </aside>
@@ -138,8 +146,15 @@
             <button class="icon-btn" id="call-audio" type="button" title="Аудиозвонок">📞</button>
             <button class="icon-btn" id="call-video" type="button" title="Видеозвонок">🎥</button>
           </div>
+          <button class="icon-btn" id="chat-menu" type="button" title="Ещё" aria-haspopup="menu">⋮</button>
           <div class="typing" id="typing" hidden></div>
         </header>
+
+        <div class="chat-search" id="chat-search" hidden>
+          <input id="chat-search-input" type="search" placeholder="Поиск по этому чату…"
+                 autocomplete="off" spellcheck="false">
+          <button class="icon-btn" id="chat-search-close" type="button" title="Закрыть поиск">✕</button>
+        </div>
 
         <div class="messages" id="messages" aria-live="polite"></div>
 
@@ -147,10 +162,28 @@
 
         <div class="composer-wrap">
           <div class="emoji-pop" id="emoji-pop" hidden></div>
+
+          <div class="reply-bar" id="reply-bar" hidden>
+            <div class="reply-bar-text">
+              <span class="reply-bar-name" id="reply-bar-name"></span>
+              <span class="reply-bar-quote" id="reply-bar-quote"></span>
+            </div>
+            <button class="icon-btn" id="reply-cancel" type="button" title="Отменить ответ">✕</button>
+          </div>
+
+          <div class="rec-bar" id="rec-bar" hidden>
+            <span class="rec-dot" aria-hidden="true"></span>
+            <span class="rec-time" id="rec-time">00:00</span>
+            <span class="rec-hint">Идёт запись…</span>
+            <button class="link-btn danger" id="rec-cancel" type="button">Отменить</button>
+            <button class="send" id="rec-send" type="button" title="Отправить">➤</button>
+          </div>
+
           <form class="composer" id="composer">
             <button class="icon-btn" id="emoji-btn" type="button" title="Эмодзи">😊</button>
             <button class="icon-btn" id="attach-btn" type="button" title="Прикрепить картинку">📎</button>
             <input type="file" id="file-input" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
+            <button class="icon-btn" id="mic-btn" type="button" title="Голосовое сообщение">🎤</button>
             <textarea id="input" rows="1" maxlength="4000" placeholder="Написать сообщение…"
                       spellcheck="true"></textarea>
             <button class="send" id="send-btn" type="submit" title="Отправить">➤</button>
@@ -199,6 +232,6 @@
   <div class="lightbox" id="lightbox" hidden><img id="lightbox-img" alt="Картинка"></div>
   <div class="toast" id="toast" hidden></div>
 
-  <script src="/app.js?v=3" type="module"></script>
+  <script src="/app.js?v=4" type="module"></script>
 </body>
 </html>

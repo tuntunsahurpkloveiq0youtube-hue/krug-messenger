@@ -9,7 +9,8 @@
     "start": "node server.mjs",
     "test": "node test/smoke.mjs",
     "test:email": "node test/email.mjs",
-    "test:call": "node test/call.mjs"
+    "test:call": "node test/call.mjs",
+    "test:features": "node test/features.mjs"
   },
   "engines": {
     "node": ">=18"

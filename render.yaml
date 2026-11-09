@@ -21,3 +21,10 @@ services:
       # демо-режим почты (код на экране) — включите, если ключа Resend нет
       - key: KRUG_DEV_MAIL
         sync: false
+      # TURN для звонков между разными сетями (необязательно): адреса через запятую
+      - key: TURN_URLS
+        sync: false
+      - key: TURN_USERNAME
+        sync: false
+      - key: TURN_CREDENTIAL
+        sync: false
