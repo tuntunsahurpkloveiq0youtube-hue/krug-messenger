@@ -50,7 +50,7 @@ async function api(method, url, body) {
 }
 
 // какие файлы заливаем: без мусора и без секретов
-const SKIP_DIRS = new Set(['data', 'tmp-demo', 'node_modules', '.git', 'build', '.gradle']);
+const SKIP_DIRS = new Set(['data', 'tmp-demo', 'node_modules', '.git', 'build', '.gradle', '__pycache__']);
 const SKIP_FILES = new Set(['local.properties', '.DS_Store', 'Thumbs.db']);
 
 function walk(dir, base = dir, out = []) {
