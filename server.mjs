@@ -21,10 +21,11 @@ const HOST = process.env.HOST || '0.0.0.0';
 const ACCESS_CODE = (process.env.FRIENDS_CODE || '').trim();
 
 /* версия сборки: видно на экране входа и по /api/version — по ней проверяют, обновился ли деплой */
-const APP_VERSION = 4;
+const APP_VERSION = 5;
 const FEATURES = [
   'rooms', 'dm', 'presence', 'typing', 'uploads', 'email', 'pwa', 'calls',
   'password', 'replies', 'reactions', 'edit', 'voice', 'profile', 'theme', 'turn', 'chat-info', 'search',
+  'mic-choice',
 ];
 
 /* вход по почте: либо Resend, либо демо-режим с кодом на экране */

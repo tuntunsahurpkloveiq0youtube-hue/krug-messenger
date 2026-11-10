@@ -1496,6 +1496,171 @@ function paintRec() {
   }
 }
 
+/* ── выбор микрофона (общий для звонков и голосовых) ── */
+
+let micDevices = [];
+let micId = localStorage.getItem('fm_mic') || '';
+
+function audioConstraints() {
+  const base = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+  return micId ? { ...base, deviceId: { exact: micId } } : base;
+}
+
+async function listMics({ ask = false } = {}) {
+  if (!navigator.mediaDevices?.enumerateDevices) return [];
+  if (ask) {
+    // метки устройств браузер показывает только после разрешения
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+      s.getTracks().forEach((t) => t.stop());
+    } catch {
+      /* пользователь может отказать — тогда покажем безымянные устройства */
+    }
+  }
+  const all = await navigator.mediaDevices.enumerateDevices();
+  micDevices = all.filter((d) => d.kind === 'audioinput');
+  return micDevices;
+}
+
+/** Подменить микрофон в идущем звонке, не прерывая разговор. */
+async function applyMicToCall() {
+  const c = call;
+  if (!c || !c.pc) return;
+  try {
+    const stream = await getMicStream();
+    const track = stream.getAudioTracks()[0];
+    if (!track) return;
+    const sender = c.pc.getSenders().find((s) => s.track && s.track.kind === 'audio');
+    if (sender) {
+      await sender.replaceTrack(track);
+    } else {
+      c.pc.addTrack(track, stream);
+      // добавлять дорожку после старта соединения нужно через новый offer
+      if (c.role === 'caller') beginOffer(c);
+      else if (c.pc && c.pc.remoteDescription) {
+        c.pc.createOffer().then(async (offer) => {
+          await c.pc.setLocalDescription(offer);
+          await postCall({ action: 'offer', callId: c.id, sdp: c.pc.localDescription.toJSON() });
+        }).catch(() => {});
+      }
+    }
+    const old = c.localStream;
+    old?.getAudioTracks().forEach((t) => t.stop());
+    c.localStream = new MediaStream([track, ...(old ? old.getVideoTracks().filter((t) => t.readyState === 'live') : [])]);
+  } catch (err) {
+    toast(mediaErrorText(err));
+  }
+}
+
+async function openMicPicker() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    toast('Браузер не даёт доступ к микрофону');
+    return;
+  }
+
+  const body = document.createElement('div');
+  body.className = 'mic-picker';
+
+  const hint = document.createElement('p');
+  hint.className = 'mic-hint';
+  hint.textContent = 'Микрофон для звонков и голосовых. Выберите нужный — индикатор покажет, что звук идёт.';
+
+  const select = document.createElement('select');
+  select.className = 'mic-select';
+  select.id = 'mic-select';
+
+  const meter = document.createElement('div');
+  meter.className = 'mic-meter';
+  const fill = document.createElement('i');
+  meter.append(fill);
+  const meterNote = document.createElement('p');
+  meterNote.className = 'mic-hint';
+  meterNote.textContent = 'Говорите — полоска должна двигаться.';
+
+  body.append(hint, select, meter, meterNote);
+
+  let liveStream = null;
+  let liveCtx = null;
+  let rafId = 0;
+
+  const stopLive = () => {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = 0;
+    liveStream?.getTracks().forEach((t) => t.stop());
+    liveStream = null;
+    if (liveCtx) {
+      liveCtx.close().catch(() => {});
+      liveCtx = null;
+    }
+    fill.style.width = '0%';
+  };
+
+  const startLive = async () => {
+    stopLive();
+    try {
+      liveStream = await navigator.mediaDevices.getUserMedia({
+        audio: select.value ? { deviceId: { exact: select.value } } : true,
+      });
+    } catch (err) {
+      toast(mediaErrorText(err));
+      return;
+    }
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    liveCtx = new Ctx();
+    const src = liveCtx.createMediaStreamSource(liveStream);
+    const analyser = liveCtx.createAnalyser();
+    analyser.fftSize = 1024;
+    src.connect(analyser);
+    const buf = new Uint8Array(analyser.fftSize);
+    const tick = () => {
+      analyser.getByteTimeDomainData(buf);
+      let peak = 0;
+      for (const v of buf) peak = Math.max(peak, Math.abs(v - 128) / 128);
+      fill.style.width = Math.min(100, Math.round(peak * 220)) + '%';
+      rafId = requestAnimationFrame(tick);
+    };
+    tick();
+  };
+
+  const devices = await listMics({ ask: true });
+  if (!devices.length) {
+    hint.textContent = 'Микрофон не найден — подключите его и разрешите доступ в браузере.';
+    meterNote.hidden = true;
+  }
+  for (const d of devices) {
+    const o = document.createElement('option');
+    o.value = d.deviceId;
+    o.textContent = d.label || `Микрофон ${select.options.length + 1}`;
+    select.append(o);
+  }
+  const known = devices.some((d) => d.deviceId === micId);
+  select.value = known ? micId : devices[0]?.deviceId || '';
+  select.addEventListener('change', startLive);
+
+  openModal({
+    title: 'Микрофон',
+    body,
+    actions: [
+      { label: 'Закрыть' },
+      {
+        label: 'Сохранить',
+        primary: true,
+        onClick: () => {
+          micId = select.value || '';
+          if (micId) localStorage.setItem('fm_mic', micId);
+          else localStorage.removeItem('fm_mic');
+          applyMicToCall();
+          toast(micId ? 'Микрофон выбран' : 'Будет микрофон по умолчанию');
+        },
+      },
+    ],
+    onClose: stopLive,
+  });
+
+  if (devices.length) startLive();
+}
+
 async function startRecord() {
   if (recBusy || recorder) return;
   if (!active) return;
@@ -1509,9 +1674,7 @@ async function startRecord() {
   }
   recBusy = true;
   try {
-    recStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
+    recStream = await getMicStream();
     const mime = pickAudioMime();
     recorder = new MediaRecorder(recStream, mime ? { mimeType: mime, audioBitsPerSecond: 64000 } : {});
     recChunks = [];
@@ -1866,6 +2029,7 @@ function openChatMenu() {
   item('Поиск в чате', '🔍', () => toggleSearch(true));
   item(isMutedConv(active) ? 'Включить уведомления' : 'Отключить уведомления', '🔔', toggleMute);
   item('Информация', 'ℹ️', showChatInfo);
+  item('Микрофон', '🎙️', openMicPicker);
 
   $('#chat-menu').after(pop);
   setTimeout(() => {
@@ -2282,15 +2446,36 @@ function mediaErrorText(err) {
   return (err && err.message) || 'Не удалось начать звонок';
 }
 
+async function getMicStream(constraints = audioConstraints()) {
+  try {
+    return await navigator.mediaDevices.getUserMedia({ audio: constraints });
+  } catch (err) {
+    // сохранённый микрофон могли отключить — возвращаемся к системному по умолчанию
+    if (err && err.name === 'OverconstrainedError') {
+      micId = '';
+      localStorage.removeItem('fm_mic');
+      return navigator.mediaDevices.getUserMedia({ audio: true });
+    }
+    throw err;
+  }
+}
+
 async function grabMedia(kind) {
   if (!callSupported()) throw new Error('Этот браузер не умеет звонить');
   if (!secureEnough()) {
     throw new Error('Звонки работают по https или на localhost — откройте сайт из Render либо через localhost');
   }
-  return navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    video: kind === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false,
-  });
+  const audio = await getMicStream();
+  if (kind !== 'video') return audio;
+  try {
+    const cam = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+    });
+    return new MediaStream([...audio.getAudioTracks(), ...cam.getVideoTracks()]);
+  } catch (err) {
+    audio.getTracks().forEach((t) => t.stop());
+    throw err;
+  }
 }
 
 function tone(freq, dur, volume = 0.05, type = 'sine') {
@@ -2382,13 +2567,18 @@ function renderCall() {
   $('#call-decline').hidden = !incoming;
   $('#call-hangup').hidden = incoming;
   $('#call-mic').hidden = !active;
+  $('#call-mic-pick').hidden = !active;
   $('#call-cam').hidden = !video;
   $('#call-timer').hidden = call.state !== 'active';
   $('#call-waves').hidden = !(incoming || call.state === 'outgoing');
 
-  $('#call-remote').hidden = !video;
+  const remoteEl = $('#call-remote');
+  remoteEl.srcObject = call.remoteStream || null;
+  remoteEl.hidden = !call.remoteStream;
+  remoteEl.classList.toggle('audio-only', !video);
+  if (call.remoteStream) remoteEl.play().catch(() => {});
+
   $('#call-avatar-stage').hidden = false;
-  $('#call-remote').srcObject = video ? call.remoteStream || null : null;
   $('#call-local').hidden = !video;
   $('#call-local').srcObject = video ? call.localStream || null : null;
 
@@ -2410,7 +2600,9 @@ function ensurePeer(c) {
     c.remoteStream = e.streams[0] || new MediaStream([e.track]);
     const el = $('#call-remote');
     el.srcObject = c.remoteStream;
+    el.hidden = false;
     el.play().catch(() => {});
+    renderCall();
   };
   pc.onconnectionstatechange = () => {
     if (call !== c) return;
@@ -2796,6 +2988,7 @@ $('#call-accept').addEventListener('click', acceptCall);
 $('#call-decline').addEventListener('click', declineCall);
 $('#call-hangup').addEventListener('click', hangupCall);
 $('#call-mic').addEventListener('click', toggleMic);
+$('#call-mic-pick').addEventListener('click', openMicPicker);
 $('#call-cam').addEventListener('click', toggleCam);
 
 /* ── меню чата, поиск, тема, профиль, голосовые ── */

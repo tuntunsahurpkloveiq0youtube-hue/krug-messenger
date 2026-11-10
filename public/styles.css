@@ -1114,6 +1114,11 @@ body.offline .me-status { color: #fbbf24; }
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
 }
 
+.call-remote.audio-only {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .call-kind {
   position: relative;
   z-index: 4;
@@ -1172,7 +1177,7 @@ body.offline .me-status { color: #fbbf24; }
   position: absolute;
   left: 18px;
   right: 128px;
-  bottom: 100px;
+  bottom: 152px;
   z-index: 2;
   flex: none;
   flex-direction: row;
@@ -1677,6 +1682,70 @@ html[data-theme='light'] .modal-card { background: var(--panel); }
   .edit-box { min-width: 160px; }
 }
 
+
+/* ───────────── ВЫБОР МИКРОФОНА ───────────── */
+
+.call-link {
+  position: relative;
+  z-index: 4;
+  align-self: stretch;
+  flex: none;
+  margin-top: 10px;
+  border: 0;
+  padding: 4px 0 0;
+  background: transparent;
+  color: rgba(233, 238, 248, 0.7);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: center;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: rgba(233, 238, 248, 0.3);
+}
+
+.call-link:hover { color: #fff; }
+
+.mic-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mic-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+  max-width: 34ch;
+}
+
+.mic-select {
+  width: 100%;
+  padding: 11px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.mic-meter {
+  height: 10px;
+  border-radius: 99px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.mic-meter > i {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--own-1), var(--own-2));
+  transition: width 0.08s linear;
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

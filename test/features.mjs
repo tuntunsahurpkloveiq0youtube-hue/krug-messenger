@@ -90,12 +90,13 @@ try {
   if (!up) throw new Error('сервер не поднялся');
 
   const version = await api('/api/version');
-  check('версия сборки — 4', version.data?.version === 4, String(version.data?.version));
+  check('версия сборки — 5', version.data?.version === 5, String(version.data?.version));
   check(
-    'фичи включают реакции и звонки',
+    'фичи включают реакции, звонки и выбор микрофона',
     Array.isArray(version.data?.features) &&
       version.data.features.includes('reactions') &&
-      version.data.features.includes('calls'),
+      version.data.features.includes('calls') &&
+      version.data.features.includes('mic-choice'),
   );
 
   const cfg = await api('/api/config');

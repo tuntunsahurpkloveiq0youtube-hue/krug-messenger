@@ -467,6 +467,31 @@ try {
     return document.documentElement.dataset.theme;
   })()`);
 
+  /* ── 4.2 Выбор микрофона ── */
+  const micInfo = await cdp.evaluate(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    document.querySelector('#chat-menu').click();
+    await sleep(300);
+    const item = [...document.querySelectorAll('.chat-menu-item')].find((b) => b.textContent.includes('Микрофон'));
+    if (!item) return { error: 'нет пункта' };
+    item.click();
+    await sleep(1400);
+    const select = document.querySelector('#mic-select');
+    return { options: select ? select.options.length : 0, label: select && select.options[0] ? select.options[0].textContent : '' };
+  })()`);
+  console.log('микрофоны:', micInfo);
+  await cdp.shot(path.join(OUT, 'mic-picker.png'));
+  console.log('shots/mic-picker.png');
+
+  await cdp.evaluate(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const close = document.querySelector('#modal .modal-close') || document.querySelector('#modal .btn');
+    if (close) close.click();
+    else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    await sleep(300);
+    return true;
+  })()`);
+
   /* ── 5. Мобильный вид с открытым чатом ── */
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await sleep(400);
@@ -569,6 +594,48 @@ try {
     await cdp.shot(path.join(OUT, 'call-video.png'));
     console.log('shots/call-video.png');
 
+    /* объективная проверка звука: у каждого свой удалённый поток и он играет */
+    const probe = `(async () => {
+      const el = document.querySelector('#call-remote');
+      const s = el.srcObject;
+      return {
+        hidden: el.hidden,
+        muted: el.muted,
+        paused: el.paused,
+        audio: s ? s.getAudioTracks().length : 0,
+        video: s ? s.getVideoTracks().length : 0,
+        state: document.querySelector('#call-status').textContent,
+      };
+    })()`;
+    console.log('звук у Ани:', await cdp.evaluate(probe));
+    console.log('звук у Бори:', await cdpB.evaluate(probe));
+
+    await cdp.evaluate(`document.querySelector('#call-hangup').click()`);
+    await sleep(900);
+
+    /* аудиозвонок: раньше в нём удалённый звук не подключался вовсе */
+    await cdp.evaluate(`document.querySelector('#call-audio').click()`);
+    await cdpB.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      for (let i = 0; i < 150; i++) {
+        if (!document.querySelector('#call').hidden) { document.querySelector('#call-accept').click(); return true; }
+        await sleep(100);
+      }
+      throw new Error('аудиозвонок не пришёл');
+    })()`);
+    await cdp.evaluate(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      for (let i = 0; i < 200; i++) {
+        if (document.querySelector('#call-status').textContent === 'Идёт звонок') return true;
+        await sleep(100);
+      }
+      throw new Error('аудиозвонок не соединился');
+    })()`);
+    await sleep(1200);
+    console.log('аудиозвонок у Ани:', await cdp.evaluate(probe));
+    console.log('аудиозвонок у Бори:', await cdpB.evaluate(probe));
+    await cdp.shot(path.join(OUT, 'call-audio.png'));
+    console.log('shots/call-audio.png');
     await cdp.evaluate(`document.querySelector('#call-hangup').click()`);
     await sleep(700);
     cdpB.ws.close();
